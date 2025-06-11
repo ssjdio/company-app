@@ -1,0 +1,1236 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ultimate Company App – Version Web</title>
+  <!-- Bootstrap CSS for styling -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- XLSX for Excel file reading -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- jsPDF for PDF export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    body {
+      background-color: #f5f5f5;
+      margin-bottom: 60px;
+    }
+    /* All screen sections hidden initially */
+    .screen { display: none; }
+    /* Sidebar styles */
+    #sidebar {
+      background-color: #f8f9fa;
+      height: 100vh;
+      overflow-y: auto;
+      padding-top: 20px;
+    }
+    #sidebar ul { list-style: none; padding: 0; }
+    #sidebar li {
+      padding: 10px 15px;
+      border-bottom: 1px solid #ddd;
+      cursor: pointer;
+    }
+    #sidebar li:hover {
+      background-color: #e2e6ea;
+    }
+    /* Fixed status bar */
+    #status-bar {
+      position: fixed;
+      bottom: 0;
+      left: 250px;
+      width: calc(100% - 250px);
+      background-color: #e9ecef;
+      padding: 8px;
+      border-top: 1px solid #ccc;
+      font-size: 0.9em;
+    }
+  </style>
+</head>
+<body>
+  <!-- Start Screen (Access Choice) -->
+  <div id="start-screen" class="screen" style="display:block;">
+    <div class="container text-center my-5">
+      <h1>Bienvenue dans Ultimate Company App</h1>
+      <p>Choisissez votre mode d'accès :</p>
+      <button class="btn btn-primary m-2" id="employee-access">Accès Employé</button>
+      <button class="btn btn-danger m-2" id="admin-access">Accès Administrateur</button>
+    </div>
+  </div>
+
+  <!-- Admin Login Screen -->
+  <div id="login-screen" class="screen">
+    <div class="container text-center my-5">
+      <h1>Connexion Administrateur</h1>
+      <div class="mx-auto" style="max-width: 300px;">
+        <div class="mb-3">
+          <label for="login-username" class="form-label">Nom d'utilisateur</label>
+          <input type="text" id="login-username" class="form-control">
+        </div>
+        <div class="mb-3">
+          <label for="login-password" class="form-label">Mot de passe</label>
+          <input type="password" id="login-password" class="form-control">
+        </div>
+        <button class="btn btn-success" id="login-btn">Connexion</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Application Screen -->
+  <div id="app-screen" class="screen">
+    <div class="container-fluid">
+      <div class="row">
+        <!-- Sidebar Navigation -->
+        <nav id="sidebar" class="col-md-3">
+          <ul id="sidebar-menu"></ul>
+          <div class="mt-auto text-center">
+            <hr>
+            <button class="btn btn-outline-danger btn-sm" id="logout-btn">Déconnexion</button>
+          </div>
+        </nav>
+        <!-- Content Area -->
+        <main id="content" class="col-md-9 p-4">
+          <div id="page-content">
+            <!-- Dynamic content injected here -->
+          </div>
+        </main>
+      </div>
+    </div>
+    <!-- Status Bar -->
+    <div id="status-bar">
+      Connecté en tant que : <span id="status-user"></span> | Heure actuelle : <span id="current-time"></span>
+    </div>
+  </div>
+
+  <!-- Bootstrap Bundle JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <!-- Main Application Script -->
+  <script>
+    /***** GLOBALS & DATA STORAGE *****/
+    let currentUser = null;
+    let role = null; // "admin" ou "employee"
+    let inactivityTimer = null;
+
+    // Simulated persistent data (mirrors the Tkinter app data)
+    const appData = {
+      inventory: {},       // {catégorie: [ {name, price}, ... ]}
+      clients: [],         // [ {name, purchases}, ... ]
+      loginEvents: [],     // [ {user, time, spent}, ... ]
+      orders: [],          // [ {id, client, total, date}, ... ]
+      suppliers: [],       // [ {name, contact, rating}, ... ]
+      projects: [],        // [ {project_id, name, deadline, status, assigned_to}, ... ]
+      announcements: [],   // [ {title, content, date}, ... ]
+      shifts: [],          // [ {employee, date, start, end, notes}, ... ]
+      expenses: [],        // [ {purpose, amount, date}, ... ]
+      settings: {
+        company_name: "Ultimate Company App",
+        theme_color: "lightgray",
+        enable_notifications: true,
+        auto_logout_time: 15  // minutes
+      },
+      feedbacks: [],       // [ {user, message, time}, ... ]
+      tasks: []            // [ {task, assignee, due, status}, ... ]
+    };
+
+    // Inventory categories (from the Python file)
+    const categories = [
+      "E36 : Matériaux Technologiques", "O15 : Fournitures de Bureau", "F58 : Mobilier et Installations",
+      "I29 : Équipements Industriels", "C12 : Électronique Grand Public", "A04 : Vêtements et Accessoires",
+      "B07 : Livres et Magazines", "H11 : Outils et Quincaillerie", "T22 : Jouets et Jeux",
+      "G31 : Épicerie et Alimentation", "P44 : Produits Pharmaceutiques", "M66 : Instruments de Musique",
+      "L55 : Éclairage et Équipements Électriques", "F20 : Alimentation et Boissons", "S33 : Matériel Sportif",
+      "A77 : Pièces Automobiles", "W88 : Technologies Portables", "D99 : Accessoires Numériques",
+      "R50 : Produits Écologiques", "L88 : Biens de Luxe", "M21 : Fournitures Médicales",
+      "CH01 : Produits pour Enfants", "PH02 : Fournitures pour Animaux", "AR03 : Matériel d'Art et Artisanat",
+      "TR04 : Accessoires de Voyage"
+    ];
+
+    // Initialize inventory per category
+    categories.forEach(cat => { appData.inventory[cat] = []; });
+
+    // Dummy users (mirroring the Tkinter app users)
+    const users = {
+      "admin": { password: "admin123", role: "admin" },
+      "employee": { password: "emp456", role: "employee" }
+    };
+
+    /***** AUTO‑LOGOUT MANAGEMENT *****/
+    function resetInactivityTimer() {
+      if (inactivityTimer) clearTimeout(inactivityTimer);
+      const autoLogoutMS = appData.settings.auto_logout_time * 60000;
+      inactivityTimer = setTimeout(() => {
+        alert("Déconnexion automatique pour cause d'inactivité.");
+        logout();
+      }, autoLogoutMS);
+    }
+    document.addEventListener("mousemove", resetInactivityTimer);
+    document.addEventListener("keydown", resetInactivityTimer);
+
+    /***** SIDEBAR POPULATION *****/
+    function populateSidebar() {
+      const sidebarMenu = document.getElementById("sidebar-menu");
+      sidebarMenu.innerHTML = "";
+      
+      // Common items (order based on the Python app)
+      let items = [
+        { label: "Tableau de Bord", id: "dashboard" },
+        { label: "Inventaire", id: "inventory" },
+        { label: "Liste des Clients", id: "clients" },
+        { label: "Liste des Employés", id: "employees" },
+        { label: "Commandes", id: "orders" },
+        { label: "Fournisseurs", id: "suppliers" },
+        { label: "Projets", id: "projects" },
+        { label: "Annonces", id: "announcements" },
+        { label: "Planification", id: "shift" },
+        { label: "Tableau Financier", id: "financial" },
+        { label: "Rapports", id: "reports" }
+      ];
+      // For employees, add "Mon Profil"
+      if (role === "employee") {
+        items.splice(1, 0, { label: "Mon Profil", id: "profile" });
+      }
+      // For admin, append "Paramètres"
+      if (role === "admin") {
+        items.push({ label: "Paramètres", id: "settings" });
+      }
+      // Additional common items
+      items = items.concat([
+        { label: "Feedback", id: "feedback" },
+        { label: "Mes Tâches", id: "tasks" },
+        { label: "Analyse Excel", id: "analysis" },
+        { label: "Exporter", id: "export" },
+        { label: "Calculatrice", id: "calculator" }
+      ]);
+      
+      // Populate the sidebar
+      items.forEach(item => {
+        const li = document.createElement("li");
+        li.textContent = item.label;
+        li.dataset.target = item.id;
+        li.addEventListener("click", () => { showPage(item.id); });
+        sidebarMenu.appendChild(li);
+      });
+    }
+
+    /***** PAGE RENDERING FUNCTIONS *****/
+    function showPage(pageId) {
+      resetInactivityTimer();
+      const content = document.getElementById("page-content");
+      switch(pageId) {
+        case "dashboard": renderDashboardPage(); break;
+        case "inventory": renderInventoryPage(); break;
+        case "clients": renderClientsPage(); break;
+        case "employees": renderEmployeesPage(); break;
+        case "orders": renderOrdersPage(); break;
+        case "suppliers": renderSuppliersPage(); break;
+        case "projects": renderProjectsPage(); break;
+        case "announcements": renderAnnouncementsPage(); break;
+        case "shift": renderShiftPage(); break;
+        case "financial": renderFinancialPage(); break;
+        case "reports": renderReportsPage(); break;
+        case "profile": renderProfilePage(); break;
+        case "settings": renderSettingsPage(); break;
+        case "feedback": renderFeedbackPage(); break;
+        case "tasks": renderTasksPage(); break;
+        case "analysis": renderExcelAnalysisPage(); break;
+        case "export": renderExportPage(); break;
+        case "calculator": renderCalculatorPage(); break;
+        default: content.innerHTML = "<h2>Section non implémentée</h2>";
+      }
+    }
+
+    /***** DASHBOARD *****/
+    function renderDashboardPage() {
+      const content = document.getElementById("page-content");
+      let inventoryCount = 0;
+      for (let cat in appData.inventory) {
+        inventoryCount += appData.inventory[cat].length;
+      }
+      const clientCount = appData.clients.length;
+      const orderCount = appData.orders.length;
+      const totalExpenses = appData.expenses.reduce((sum, exp) => sum + exp.amount, 0);
+      
+      let recentAnn = "";
+      if (appData.announcements.length > 0) {
+        const lastThree = appData.announcements.slice(-3);
+        lastThree.forEach(a => {
+          recentAnn += `<p><strong>${a.date}</strong>: ${a.title} – ${a.content}</p>`;
+        });
+      } else {
+        recentAnn = "<p>Aucune annonce pour le moment.</p>";
+      }
+      
+      content.innerHTML = `
+        <h2>Tableau de Bord</h2>
+        <p>Bienvenue, ${currentUser}!</p>
+        <div class="row mb-3">
+          <div class="col-md-3">
+            <div class="card p-3">
+              <h5>Inventaire Total</h5>
+              <p>${inventoryCount}</p>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card p-3">
+              <h5>Nombre de Clients</h5>
+              <p>${clientCount}</p>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card p-3">
+              <h5>Nombre de Commandes</h5>
+              <p>${orderCount}</p>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card p-3">
+              <h5>Dépenses Totales</h5>
+              <p>${totalExpenses.toFixed(2)} €</p>
+            </div>
+          </div>
+        </div>
+        <div>
+          <h4>Annonces Récentes</h4>
+          ${recentAnn}
+        </div>
+      `;
+    }
+
+    /***** INVENTORY *****/
+    function renderInventoryPage() {
+      const content = document.getElementById("page-content");
+      let optionsHTML = "";
+      categories.forEach(cat => { optionsHTML += `<option value="${cat}">${cat}</option>`; });
+      content.innerHTML = `
+        <h2>Inventaire</h2>
+        <form id="inventory-form" class="mb-3">
+          <div class="mb-3">
+            <label for="inv-category" class="form-label">Catégorie:</label>
+            <select id="inv-category" class="form-select">${optionsHTML}</select>
+          </div>
+          <div class="mb-3">
+            <label for="inv-product-name" class="form-label">Nom du produit:</label>
+            <input type="text" id="inv-product-name" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label for="inv-product-price" class="form-label">Prix:</label>
+            <input type="number" step="0.01" id="inv-product-price" class="form-control" required>
+          </div>
+          <button type="submit" class="btn btn-primary">Ajouter le Produit</button>
+        </form>
+        <h3>Liste des Produits</h3>
+        <table class="table table-bordered" id="inventory-table">
+          <thead>
+            <tr>
+              <th>Catégorie</th>
+              <th>Nom</th>
+              <th>Prix</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      `;
+      document.getElementById("inventory-form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const cat = document.getElementById("inv-category").value;
+        const name = document.getElementById("inv-product-name").value.trim();
+        const price = parseFloat(document.getElementById("inv-product-price").value);
+        if (!name || isNaN(price)) { alert("Veuillez saisir des informations valides."); return; }
+        appData.inventory[cat].push({ name, price });
+        alert(`Produit '${name}' ajouté à ${cat}.`);
+        document.getElementById("inv-product-name").value = "";
+        document.getElementById("inv-product-price").value = "";
+        renderInventoryTable();
+      });
+      renderInventoryTable();
+    }
+    function renderInventoryTable() {
+      const tbody = document.querySelector("#inventory-table tbody");
+      tbody.innerHTML = "";
+      for (let cat in appData.inventory) {
+        appData.inventory[cat].forEach((prod, idx) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${cat}</td>
+            <td>${prod.name}</td>
+            <td>${prod.price.toFixed(2)} €</td>
+            <td><button class="btn btn-danger btn-sm" onclick="deleteInventoryItem('${cat}', ${idx})">Supprimer</button></td>
+          `;
+          tbody.appendChild(tr);
+        });
+      }
+    }
+    function deleteInventoryItem(cat, idx) {
+      if (confirm("Voulez-vous supprimer cet article ?")) {
+        appData.inventory[cat].splice(idx, 1);
+        renderInventoryTable();
+      }
+    }
+
+    /***** CLIENTS *****/
+    function renderClientsPage() {
+      const content = document.getElementById("page-content");
+      content.innerHTML = `
+        <h2>Liste des Clients</h2>
+        <form id="client-form" class="mb-3">
+          <div class="mb-3">
+            <label for="client-name" class="form-label">Nom du client:</label>
+            <input type="text" id="client-name" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label for="client-purchase" class="form-label">Montant d'achat:</label>
+            <input type="number" step="0.01" id="client-purchase" class="form-control" required>
+          </div>
+          <button type="submit" class="btn btn-primary">Ajouter Client</button>
+        </form>
+        <h3>Clients</h3>
+        <table class="table table-bordered" id="clients-table">
+          <thead>
+            <tr>
+              <th>Nom</th>
+              <th>Achat</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      `;
+      document.getElementById("client-form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const name = document.getElementById("client-name").value.trim();
+        const purchase = parseFloat(document.getElementById("client-purchase").value);
+        if (!name || isNaN(purchase)) { alert("Veuillez saisir des informations valides."); return; }
+        appData.clients.push({ name, purchases: purchase });
+        alert(`Client '${name}' ajouté.`);
+        document.getElementById("client-name").value = "";
+        document.getElementById("client-purchase").value = "";
+        renderClientsTable();
+      });
+      renderClientsTable();
+    }
+    function renderClientsTable() {
+      const tbody = document.querySelector("#clients-table tbody");
+      tbody.innerHTML = "";
+      appData.clients.forEach((cl, idx) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${cl.name}</td>
+          <td>${cl.purchases.toFixed(2)} €</td>
+          <td><button class="btn btn-danger btn-sm" onclick="deleteClient(${idx})">Supprimer</button></td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+    function deleteClient(idx) {
+      if (confirm("Voulez-vous supprimer ce client ?")) {
+        appData.clients.splice(idx, 1);
+        renderClientsTable();
+      }
+    }
+
+    /***** EMPLOYEES (Connexion Events) *****/
+    function renderEmployeesPage() {
+      const content = document.getElementById("page-content");
+      content.innerHTML = `
+        <h2>Liste des Employés (Connexions)</h2>
+        <table class="table table-bordered" id="employees-table">
+          <thead>
+            <tr>
+              <th>Utilisateur</th>
+              <th>Heure de connexion</th>
+              <th>Dépensé</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <button class="btn btn-info btn-sm" onclick="renderEmployeeSummary()">Résumé des Employés</button>
+      `;
+      const tbody = document.querySelector("#employees-table tbody");
+      tbody.innerHTML = "";
+      if (appData.loginEvents.length === 0) {
+        tbody.innerHTML = "<tr><td colspan='3'>Aucun enregistrement de connexion.</td></tr>";
+      } else {
+        appData.loginEvents.forEach(event => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td>${event.user}</td><td>${event.time}</td><td>${event.spent}</td>`;
+          tbody.appendChild(tr);
+        });
+      }
+    }
+    function renderEmployeeSummary() {
+      const summary = {};
+      appData.loginEvents.forEach(event => {
+        summary[event.user] = (summary[event.user] || 0) + 1;
+      });
+      let summaryHTML = "<h3>Résumé des Employés</h3><table class='table table-bordered'><thead><tr><th>Utilisateur</th><th>Nombre de connexions</th></tr></thead><tbody>";
+      for (let user in summary) {
+        summaryHTML += `<tr><td>${user}</td><td>${summary[user]}</td></tr>`;
+      }
+      summaryHTML += "</tbody></table>";
+      document.getElementById("page-content").innerHTML = summaryHTML;
+    }
+
+    /***** ORDERS *****/
+    function renderOrdersPage() {
+      const content = document.getElementById("page-content");
+      content.innerHTML = `
+        <h2>Commandes</h2>
+        <form id="order-form" class="mb-3">
+          <div class="mb-3">
+            <label for="order-client" class="form-label">Nom du client:</label>
+            <input type="text" id="order-client" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label for="order-total" class="form-label">Montant total:</label>
+            <input type="number" step="0.01" id="order-total" class="form-control" required>
+          </div>
+          <button type="submit" class="btn btn-primary">Ajouter Commande</button>
+        </form>
+        <h3>Liste des Commandes</h3>
+        <table class="table table-bordered" id="orders-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Client</th>
+              <th>Total</th>
+              <th>Date</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      `;
+      document.getElementById("order-form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const client = document.getElementById("order-client").value.trim();
+        const total = parseFloat(document.getElementById("order-total").value);
+        if (!client || isNaN(total)) { alert("Veuillez saisir des informations valides."); return; }
+        const id = appData.orders.length + 1;
+        const date = new Date().toLocaleString();
+        appData.orders.push({ id, client, total, date });
+        alert(`Commande ajoutée (ID: ${id}).`);
+        document.getElementById("order-client").value = "";
+        document.getElementById("order-total").value = "";
+        renderOrdersTable();
+      });
+      renderOrdersTable();
+    }
+    function renderOrdersTable() {
+      const tbody = document.querySelector("#orders-table tbody");
+      tbody.innerHTML = "";
+      appData.orders.forEach((order, idx) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${order.id}</td>
+          <td>${order.client}</td>
+          <td>${order.total.toFixed(2)} €</td>
+          <td>${order.date}</td>
+          <td><button class="btn btn-danger btn-sm" onclick="deleteOrder(${idx})">Supprimer</button></td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+    function deleteOrder(idx) {
+      if (confirm("Voulez-vous supprimer cette commande ?")) {
+        appData.orders.splice(idx, 1);
+        renderOrdersTable();
+      }
+    }
+
+    /***** SUPPLIERS *****/
+    function renderSuppliersPage() {
+      const content = document.getElementById("page-content");
+      content.innerHTML = `
+        <h2>Fournisseurs</h2>
+        <form id="supplier-form" class="mb-3">
+          <div class="mb-3">
+            <label for="supplier-name" class="form-label">Nom du fournisseur:</label>
+            <input type="text" id="supplier-name" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label for="supplier-contact" class="form-label">Contact:</label>
+            <input type="text" id="supplier-contact" class="form-control">
+          </div>
+          <div class="mb-3">
+            <label for="supplier-rating" class="form-label">Note (1-5):</label>
+            <input type="number" step="0.1" id="supplier-rating" class="form-control" required>
+          </div>
+          <button type="submit" class="btn btn-primary">Ajouter Fournisseur</button>
+        </form>
+        <h3>Liste des Fournisseurs</h3>
+        <table class="table table-bordered" id="suppliers-table">
+          <thead>
+            <tr>
+              <th>Nom</th>
+              <th>Contact</th>
+              <th>Note</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      `;
+      document.getElementById("supplier-form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const name = document.getElementById("supplier-name").value.trim();
+        const contact = document.getElementById("supplier-contact").value.trim();
+        const rating = parseFloat(document.getElementById("supplier-rating").value);
+        if (!name || isNaN(rating)) { alert("Veuillez saisir des informations valides."); return; }
+        appData.suppliers.push({ name, contact, rating });
+        alert(`Fournisseur '${name}' ajouté.`);
+        document.getElementById("supplier-name").value = "";
+        document.getElementById("supplier-contact").value = "";
+        document.getElementById("supplier-rating").value = "";
+        renderSuppliersTable();
+      });
+      renderSuppliersTable();
+    }
+    function renderSuppliersTable() {
+      const tbody = document.querySelector("#suppliers-table tbody");
+      tbody.innerHTML = "";
+      appData.suppliers.forEach((supp, idx) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${supp.name}</td>
+          <td>${supp.contact}</td>
+          <td>${supp.rating}</td>
+          <td>
+            <button class="btn btn-warning btn-sm" onclick="modifySupplier(${idx})">Modifier</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteSupplier(${idx})">Supprimer</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+    function modifySupplier(idx) {
+      const supp = appData.suppliers[idx];
+      const newName = prompt("Nouveau nom :", supp.name);
+      if (newName === null) return;
+      const newContact = prompt("Nouveau contact :", supp.contact);
+      const newRating = prompt("Nouvelle note (1-5) :", supp.rating);
+      if (newName.trim() && newRating && !isNaN(newRating)) {
+        supp.name = newName.trim();
+        supp.contact = newContact ? newContact.trim() : "";
+        supp.rating = parseFloat(newRating);
+        alert("Fournisseur modifié.");
+        renderSuppliersTable();
+      } else {
+        alert("Modification annulée ou informations invalides.");
+      }
+    }
+    function deleteSupplier(idx) {
+      if (confirm("Supprimer ce fournisseur ?")) {
+        appData.suppliers.splice(idx, 1);
+        renderSuppliersTable();
+      }
+    }
+
+    /***** PROJECTS *****/
+    function renderProjectsPage() {
+      const content = document.getElementById("page-content");
+      content.innerHTML = `
+        <h2>Projets</h2>
+        <form id="project-form" class="mb-3">
+          <div class="mb-3">
+            <label for="project-name" class="form-label">Nom du projet:</label>
+            <input type="text" id="project-name" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label for="project-deadline" class="form-label">Date limite (AAAA-MM-JJ):</label>
+            <input type="date" id="project-deadline" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label for="project-status" class="form-label">Statut (En attente/En cours/Terminé):</label>
+            <input type="text" id="project-status" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label for="project-assigned" class="form-label">Assigné à:</label>
+            <input type="text" id="project-assigned" class="form-control">
+          </div>
+          <button type="submit" class="btn btn-primary">Ajouter Projet</button>
+        </form>
+        <h3>Liste des Projets</h3>
+        <table class="table table-bordered" id="projects-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Nom</th>
+              <th>Date Limite</th>
+              <th>Statut</th>
+              <th>Assigné à</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      `;
+      document.getElementById("project-form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const name = document.getElementById("project-name").value.trim();
+        const deadline = document.getElementById("project-deadline").value;
+        const status = document.getElementById("project-status").value.trim();
+        const assigned = document.getElementById("project-assigned").value.trim();
+        if (!name || !deadline || !status) { alert("Veuillez saisir des informations valides."); return; }
+        const project_id = appData.projects.length + 1;
+        appData.projects.push({ project_id, name, deadline, status, assigned_to: assigned });
+        alert("Projet ajouté.");
+        document.getElementById("project-name").value = "";
+        document.getElementById("project-deadline").value = "";
+        document.getElementById("project-status").value = "";
+        document.getElementById("project-assigned").value = "";
+        renderProjectsTable();
+      });
+      renderProjectsTable();
+    }
+    function renderProjectsTable() {
+      const tbody = document.querySelector("#projects-table tbody");
+      tbody.innerHTML = "";
+      appData.projects.forEach((proj, idx) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${proj.project_id}</td>
+          <td>${proj.name}</td>
+          <td>${proj.deadline}</td>
+          <td>${proj.status}</td>
+          <td>${proj.assigned_to}</td>
+          <td>
+            <button class="btn btn-warning btn-sm" onclick="modifyProject(${idx})">Modifier</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteProject(${idx})">Supprimer</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+    function modifyProject(idx) {
+      const proj = appData.projects[idx];
+      const newName = prompt("Nouveau nom :", proj.name);
+      if (newName === null) return;
+      const newDeadline = prompt("Nouvelle date limite (AAAA-MM-JJ) :", proj.deadline);
+      const newStatus = prompt("Nouveau statut :", proj.status);
+      const newAssigned = prompt("Attribué à :", proj.assigned_to);
+      if (newName.trim() && newDeadline && newStatus.trim()) {
+        proj.name = newName.trim();
+        proj.deadline = newDeadline;
+        proj.status = newStatus.trim();
+        proj.assigned_to = newAssigned ? newAssigned.trim() : "";
+        alert("Projet modifié.");
+        renderProjectsTable();
+      } else {
+        alert("Modification annulée ou informations invalides.");
+      }
+    }
+    function deleteProject(idx) {
+      if (confirm("Supprimer ce projet ?")) {
+        appData.projects.splice(idx, 1);
+        renderProjectsTable();
+      }
+    }
+
+    /***** ANNOUNCEMENTS *****/
+    function renderAnnouncementsPage() {
+      const content = document.getElementById("page-content");
+      let annHTML = `<h2>Annonces</h2>`;
+      if (role === "admin") {
+        annHTML += `
+          <button class="btn btn-primary mb-3" onclick="addAnnouncement()">Ajouter une Annonce</button>
+        `;
+      }
+      annHTML += `<table class="table table-bordered" id="announcements-table">
+                    <thead>
+                      <tr>
+                        <th>Titre</th>
+                        <th>Date</th>
+                        <th>Contenu</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>`;
+      content.innerHTML = annHTML;
+      renderAnnouncementsTable();
+    }
+    function addAnnouncement() {
+      const title = prompt("Titre de l'annonce :");
+      if (!title) return;
+      const content = prompt("Contenu de l'annonce :");
+      const date = new Date().toLocaleString();
+      appData.announcements.push({ title, content, date });
+      alert("Annonce ajoutée.");
+      renderAnnouncementsTable();
+    }
+    function renderAnnouncementsTable() {
+      const tbody = document.querySelector("#announcements-table tbody");
+      tbody.innerHTML = "";
+      appData.announcements.forEach(ann => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${ann.title}</td><td>${ann.date}</td><td>${ann.content}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    /***** SHIFT SCHEDULING *****/
+    function renderShiftPage() {
+      const content = document.getElementById("page-content");
+      content.innerHTML = `
+        <h2>Planification des Quarts de Travail</h2>
+        ${role === "admin" ? `<button class="btn btn-primary mb-3" onclick="addShift()">Ajouter un Quart</button>` : ""}
+        <table class="table table-bordered" id="shift-table">
+          <thead>
+            <tr>
+              <th>Employé</th>
+              <th>Date</th>
+              <th>Début</th>
+              <th>Fin</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      `;
+      renderShiftTable();
+    }
+    function addShift() {
+      const employee = prompt("Nom de l'employé :");
+      const date = prompt("Date du quart (AAAA-MM-JJ) :");
+      const start = prompt("Heure de début (HH:MM) :");
+      const end = prompt("Heure de fin (HH:MM) :");
+      const notes = prompt("Notes :");
+      appData.shifts.push({ employee, date, start, end, notes });
+      alert("Quart ajouté.");
+      renderShiftTable();
+    }
+    function renderShiftTable() {
+      const tbody = document.querySelector("#shift-table tbody");
+      tbody.innerHTML = "";
+      appData.shifts.forEach(s => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${s.employee}</td><td>${s.date}</td><td>${s.start}</td><td>${s.end}</td><td>${s.notes}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    /***** FINANCIAL DASHBOARD *****/
+    function renderFinancialPage() {
+      const content = document.getElementById("page-content");
+      const totalRevenue = appData.orders.reduce((sum, o) => sum + o.total, 0);
+      const orderCount = appData.orders.length;
+      const avgOrder = orderCount > 0 ? (totalRevenue / orderCount) : 0;
+      const totalExpenses = appData.expenses.reduce((sum, exp) => sum + exp.amount, 0);
+      const netProfit = totalRevenue - totalExpenses;
+      let ordersHTML = "";
+      appData.orders.forEach(o => {
+        ordersHTML += `<tr><td>${o.id}</td><td>${o.client}</td><td>${o.total.toFixed(2)} €</td><td>${o.date}</td></tr>`;
+      });
+      content.innerHTML = `
+        <h2>Tableau Financier</h2>
+        <p>Revenu Total : ${totalRevenue.toFixed(2)} €</p>
+        <p>Nombre de Commandes : ${orderCount}</p>
+        <p>Valeur Moyenne par Commande : ${avgOrder.toFixed(2)} €</p>
+        <p>Dépenses Totales : ${totalExpenses.toFixed(2)} €</p>
+        <p>Profit Net : ${netProfit.toFixed(2)} €</p>
+        <h3>Détails des Commandes</h3>
+        <table class="table table-bordered">
+          <thead><tr><th>ID</th><th>Client</th><th>Total</th><th>Date</th></tr></thead>
+          <tbody>${ordersHTML}</tbody>
+        </table>
+      `;
+    }
+
+    /***** REPORTS *****/
+    function renderReportsPage() {
+      const content = document.getElementById("page-content");
+      let totalProducts = 0;
+      for (let cat in appData.inventory) { totalProducts += appData.inventory[cat].length; }
+      const clientCount = appData.clients.length;
+      const avgPurchase = clientCount > 0 ? (appData.clients.reduce((sum, c) => sum + c.purchases, 0) / clientCount) : 0;
+      const loginCount = appData.loginEvents.length;
+      let invDetails = "";
+      for (let cat in appData.inventory) {
+        invDetails += `<p>${cat} : ${appData.inventory[cat].length} articles</p>`;
+      }
+      content.innerHTML = `
+        <h2>Rapports</h2>
+        <p>Total d'articles en inventaire : ${totalProducts}</p>
+        <p>Nombre de Clients : ${clientCount}</p>
+        <p>Achat moyen par client : ${avgPurchase.toFixed(2)} €</p>
+        <p>Total des connexions : ${loginCount}</p>
+        <h3>Inventaire par Catégorie</h3>
+        ${invDetails}
+      `;
+    }
+
+    /***** PROFILE *****/
+    function renderProfilePage() {
+      const content = document.getElementById("page-content");
+      const userEvents = appData.loginEvents.filter(e => e.user === currentUser);
+      content.innerHTML = `
+        <h2>Mon Profil</h2>
+        <p>Utilisateur : ${currentUser}</p>
+        <p>Nombre de connexions : ${userEvents.length}</p>
+      `;
+    }
+
+    /***** SETTINGS *****/
+    function renderSettingsPage() {
+      const content = document.getElementById("page-content");
+      content.innerHTML = `
+        <h2>Paramètres</h2>
+        <form id="settings-form">
+          <div class="mb-3">
+            <label class="form-label">Nom de l'entreprise :</label>
+            <input type="text" id="setting-company-name" class="form-control" value="${appData.settings.company_name}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Couleur du thème :</label>
+            <select id="setting-theme-color" class="form-select">
+              <option ${appData.settings.theme_color==="lightgray"?"selected":""}>lightgray</option>
+              <option ${appData.settings.theme_color==="white"?"selected":""}>white</option>
+              <option ${appData.settings.theme_color==="lightblue"?"selected":""}>lightblue</option>
+              <option ${appData.settings.theme_color==="lightgreen"?"selected":""}>lightgreen</option>
+              <option ${appData.settings.theme_color==="lightyellow"?"selected":""}>lightyellow</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Activer les notifications :</label>
+            <input type="checkbox" id="setting-notifications" ${appData.settings.enable_notifications ? "checked" : ""}>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Temps d'auto-déconnexion (min) :</label>
+            <input type="number" id="setting-auto-logout" class="form-control" value="${appData.settings.auto_logout_time}">
+          </div>
+          <button type="submit" class="btn btn-primary">Enregistrer les Paramètres</button>
+        </form>
+        ${role==="admin" ? `<div class="mt-3">
+          <button class="btn btn-warning" onclick="updateAdminPassword()">Mettre à jour le mot de passe admin</button>
+          <button class="btn btn-danger" onclick="clearLoginLogs()">Effacer les logs de connexion</button>
+          <button class="btn btn-info" onclick="saveData()">Sauvegarder les données</button>
+          <button class="btn btn-secondary" onclick="loadData()">Charger les données</button>
+          <button class="btn btn-dark" onclick="resetData()">Réinitialiser les données</button>
+        </div>` : ""}
+      `;
+      document.getElementById("settings-form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        appData.settings.company_name = document.getElementById("setting-company-name").value;
+        appData.settings.theme_color = document.getElementById("setting-theme-color").value;
+        appData.settings.enable_notifications = document.getElementById("setting-notifications").checked;
+        appData.settings.auto_logout_time = parseInt(document.getElementById("setting-auto-logout").value);
+        alert("Paramètres enregistrés !");
+        document.title = appData.settings.company_name;
+      });
+    }
+    function updateAdminPassword() {
+      const currentPass = prompt("Entrez le mot de passe actuel :");
+      if (!currentPass || currentPass !== users["admin"].password) {
+        alert("Mot de passe actuel incorrect.");
+        return;
+      }
+      const newPass = prompt("Entrez le nouveau mot de passe :");
+      if (!newPass) return;
+      const confirmPass = prompt("Confirmez le nouveau mot de passe :");
+      if (newPass !== confirmPass) {
+        alert("Les mots de passe ne correspondent pas !");
+        return;
+      }
+      users["admin"].password = newPass;
+      alert("Mot de passe mis à jour.");
+    }
+    function clearLoginLogs() {
+      appData.loginEvents = [];
+      alert("Les logs de connexion ont été effacés.");
+      renderEmployeesPage();
+    }
+    function saveData() {
+      // In a real application, you might send appData to a server.
+      localStorage.setItem("companyData", JSON.stringify(appData));
+      alert("Données sauvegardées.");
+    }
+    function loadData() {
+      const data = localStorage.getItem("companyData");
+      if (data) {
+        Object.assign(appData, JSON.parse(data));
+        alert("Données chargées.");
+        showPage("dashboard");
+      } else {
+        alert("Aucune donnée sauvegardée trouvée.");
+      }
+    }
+    function resetData() {
+      if (confirm("Réinitialiser l'inventaire et la liste des clients ?")) {
+        categories.forEach(cat => { appData.inventory[cat] = []; });
+        appData.clients = [];
+        alert("Les données ont été réinitialisées.");
+        showPage("dashboard");
+      }
+    }
+
+    /***** FEEDBACK *****/
+    function renderFeedbackPage() {
+      const content = document.getElementById("page-content");
+      let feedbackHTML = `<h2>Feedback</h2>
+                          <ul class="list-group mb-3" id="feedback-list">`;
+      appData.feedbacks.forEach(fb => {
+        feedbackHTML += `<li class="list-group-item"><strong>${fb.time}</strong> - ${fb.user}: ${fb.message}</li>`;
+      });
+      feedbackHTML += `</ul>
+                       <button class="btn btn-primary" onclick="addFeedback()">Ajouter Feedback</button>`;
+      content.innerHTML = feedbackHTML;
+    }
+    function addFeedback() {
+      const message = prompt("Entrez votre feedback :");
+      if (message) {
+        appData.feedbacks.push({
+          user: currentUser,
+          message,
+          time: new Date().toLocaleString()
+        });
+        alert("Feedback ajouté.");
+        renderFeedbackPage();
+      }
+    }
+
+    /***** TASKS *****/
+    function renderTasksPage() {
+      const content = document.getElementById("page-content");
+      let tasksHTML = `<h2>Mes Tâches</h2>
+                       <ul class="list-group" id="tasks-list">`;
+      appData.tasks.forEach(task => {
+        if (role === "employee" && task.assignee !== currentUser) return;
+        tasksHTML += `<li class="list-group-item">${task.due} – ${task.task} (Status: ${task.status})</li>`;
+      });
+      tasksHTML += `</ul>`;
+      if (role === "admin") {
+        tasksHTML += `<button class="btn btn-primary mt-3" onclick="addTask()">Ajouter Tâche</button>`;
+      }
+      content.innerHTML = tasksHTML;
+    }
+    function addTask() {
+      if (role !== "admin") {
+        alert("Seul l'administrateur peut ajouter des tâches.");
+        return;
+      }
+      const taskText = prompt("Description de la tâche :");
+      if (!taskText) return;
+      const assignee = prompt("Attribuer à (nom de l'employé) :");
+      const due = prompt("Date d'échéance (AAAA-MM-JJ) :");
+      appData.tasks.push({ task: taskText, assignee, due, status: "Pending" });
+      alert("Tâche ajoutée.");
+      renderTasksPage();
+    }
+
+    /***** EXCEL ANALYSIS *****/
+    function renderExcelAnalysisPage() {
+      const content = document.getElementById("page-content");
+      content.innerHTML = `
+        <h2>Analyse Excel</h2>
+        <input type="file" id="excel-file" accept=".xlsx, .xls" class="form-control mb-3">
+        <pre id="excel-output"></pre>
+      `;
+      document.getElementById("excel-file").addEventListener("change", function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(event) {
+          const data = new Uint8Array(event.target.result);
+          const workbook = XLSX.read(data, { type: "array" });
+          let output = "";
+          workbook.SheetNames.forEach(sheetName => {
+            const sheet = workbook.Sheets[sheetName];
+            const jsonData = XLSX.utils.sheet_to_json(sheet, { header:1 });
+            output += `Feuille: ${sheetName}\\n`;
+            output += `Nombre de lignes: ${jsonData.length}\\n`;
+            if (jsonData.length > 0) {
+              output += `Colonnes: ${jsonData[0].join(", ")}\\n`;
+            }
+            output += "\\n";
+          });
+          document.getElementById("excel-output").textContent = output;
+        };
+        reader.readAsArrayBuffer(file);
+      });
+    }
+
+    /***** EXPORT *****/
+    function renderExportPage() {
+      const content = document.getElementById("page-content");
+      content.innerHTML = `
+        <h2>Exporter</h2>
+        <form id="export-form" class="mb-3">
+          <div class="mb-3">
+            <label class="form-label">Sélectionnez les données à exporter :</label>
+            <select id="export-data" class="form-select">
+              <option value="inventory">Inventaire</option>
+              <option value="clients">Clients</option>
+              <option value="orders">Commandes</option>
+              <option value="suppliers">Fournisseurs</option>
+              <option value="projects">Projets</option>
+              <option value="announcements">Annonces</option>
+              <option value="shifts">Quarts de travail</option>
+              <option value="expenses">Dépenses</option>
+              <option value="feedbacks">Feedback</option>
+              <option value="tasks">Tâches</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Sélectionnez le format :</label>
+            <select id="export-format" class="form-select">
+              <option value="JSON">JSON</option>
+              <option value="CSV">CSV</option>
+              <option value="Excel">Excel</option>
+              <option value="PDF">PDF</option>
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary">Exporter</button>
+        </form>
+        <div id="export-result"></div>
+      `;
+      document.getElementById("export-form").addEventListener("submit", function(e) {
+        e.preventDefault();
+        const dataType = document.getElementById("export-data").value;
+        const format = document.getElementById("export-format").value;
+        let dataToExport;
+        if (dataType === "inventory") dataToExport = appData.inventory;
+        else if (dataType === "clients") dataToExport = appData.clients;
+        else if (dataType === "orders") dataToExport = appData.orders;
+        else if (dataType === "suppliers") dataToExport = appData.suppliers;
+        else if (dataType === "projects") dataToExport = appData.projects;
+        else if (dataType === "announcements") dataToExport = appData.announcements;
+        else if (dataType === "shifts") dataToExport = appData.shifts;
+        else if (dataType === "expenses") dataToExport = appData.expenses;
+        else if (dataType === "feedbacks") dataToExport = appData.feedbacks;
+        else if (dataType === "tasks") dataToExport = appData.tasks;
+        // For brevity, here we just output the JSON.
+        // In production, you would convert to CSV, Excel or PDF accordingly.
+        if (format === "JSON") {
+          document.getElementById("export-result").textContent = JSON.stringify(dataToExport, null, 2);
+        } else {
+          alert("Format d'export non implémenté dans cette démo.");
+        }
+      });
+    }
+
+    /***** CALCULATOR *****/
+    function renderCalculatorPage() {
+      const content = document.getElementById("page-content");
+      content.innerHTML = `
+        <h2>Calculatrice</h2>
+        <div class="mb-3" style="max-width:300px;">
+          <input type="text" id="calc-display" class="form-control" readonly>
+        </div>
+        <div style="max-width:300px;">
+          <div class="btn-group mb-2">
+            <button class="btn btn-secondary" onclick="calcInput('7')">7</button>
+            <button class="btn btn-secondary" onclick="calcInput('8')">8</button>
+            <button class="btn btn-secondary" onclick="calcInput('9')">9</button>
+            <button class="btn btn-secondary" onclick="calcInput('/')">/</button>
+          </div>
+          <div class="btn-group mb-2">
+            <button class="btn btn-secondary" onclick="calcInput('4')">4</button>
+            <button class="btn btn-secondary" onclick="calcInput('5')">5</button>
+            <button class="btn btn-secondary" onclick="calcInput('6')">6</button>
+            <button class="btn btn-secondary" onclick="calcInput('*')">*</button>
+          </div>
+          <div class="btn-group mb-2">
+            <button class="btn btn-secondary" onclick="calcInput('1')">1</button>
+            <button class="btn btn-secondary" onclick="calcInput('2')">2</button>
+            <button class="btn btn-secondary" onclick="calcInput('3')">3</button>
+            <button class="btn btn-secondary" onclick="calcInput('-')">-</button>
+          </div>
+          <div class="btn-group mb-2">
+            <button class="btn btn-secondary" onclick="calcInput('0')">0</button>
+            <button class="btn btn-secondary" onclick="calcInput('.')">.</button>
+            <button class="btn btn-secondary" onclick="calcClear()">C</button>
+            <button class="btn btn-secondary" onclick="calcInput('+')">+</button>
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-primary" onclick="calcEvaluate()">=</button>
+          </div>
+        </div>
+      `;
+    }
+    function calcInput(val) {
+      document.getElementById('calc-display').value += val;
+    }
+    function calcClear() {
+      document.getElementById('calc-display').value = '';
+    }
+    function calcEvaluate() {
+      try {
+        const result = eval(document.getElementById('calc-display').value);
+        document.getElementById('calc-display').value = result;
+      } catch (error) {
+        alert("Expression invalide !");
+      }
+    }
+
+    /***** LOGIN & ACCESS MANAGEMENT *****/
+    // Employee access
+    document.getElementById("employee-access").addEventListener("click", function() {
+      let name = prompt("Saisissez votre nom d'utilisateur (Employé) :", "employé");
+      if (!name || name.trim() === "") { name = "employé"; }
+      currentUser = name;
+      role = "employee";
+      addLoginEvent();
+      startApp();
+    });
+
+    // Admin access: show login screen
+    document.getElementById("admin-access").addEventListener("click", function() {
+      document.getElementById("start-screen").style.display = "none";
+      document.getElementById("login-screen").style.display = "block";
+    });
+
+    // Admin login
+    document.getElementById("login-btn").addEventListener("click", function() {
+      const username = document.getElementById("login-username").value.trim();
+      const password = document.getElementById("login-password").value.trim();
+      if (users[username] && users[username].role === "admin" && users[username].password === password) {
+        currentUser = username;
+        role = "admin";
+        addLoginEvent();
+        startApp();
+      } else {
+        alert("Identifiants invalides !");
+      }
+    });
+
+    // Logout
+    document.getElementById("logout-btn").addEventListener("click", function() {
+      if (confirm("Confirmez-vous la déconnexion ?")) {
+        logout();
+      }
+    });
+
+    function addLoginEvent() {
+      const event = {
+        user: currentUser,
+        time: new Date().toLocaleString(),
+        spent: 0
+      };
+      appData.loginEvents.push(event);
+    }
+
+    function startApp() {
+      document.getElementById("start-screen").style.display = "none";
+      document.getElementById("login-screen").style.display = "none";
+      document.getElementById("app-screen").style.display = "block";
+      document.getElementById("status-user").textContent = currentUser;
+      populateSidebar();
+      showPage("dashboard");
+      resetInactivityTimer();
+    }
+
+    function logout() {
+      currentUser = null;
+      role = null;
+      clearTimeout(inactivityTimer);
+      document.getElementById("app-screen").style.display = "none";
+      document.getElementById("start-screen").style.display = "block";
+    }
+
+    // Update current time in status bar every second.
+    function updateCurrentTime() {
+      document.getElementById("current-time").textContent = new Date().toLocaleTimeString();
+    }
+    setInterval(updateCurrentTime, 1000);
+  </script>
+</body>
+</html>
